@@ -64,7 +64,6 @@ import org.javacs.kt.util.KotlinLSException
 import org.javacs.kt.util.LoggingMessageCollector
 import org.jetbrains.kotlin.cli.common.output.writeAllTo
 import org.jetbrains.kotlin.codegen.ClassBuilderFactories
-import org.jetbrains.kotlin.codegen.KotlinCodegenFacade
 import org.jetbrains.kotlin.codegen.state.GenerationState
 import org.jetbrains.kotlin.container.getService
 import org.jetbrains.kotlin.descriptors.ModuleDescriptor
@@ -591,21 +590,6 @@ class Compiler(
     }
 
     fun generateCode(module: ModuleDescriptor, bindingContext: BindingContext, files: Collection<KtFile>) {
-        outputDirectory.takeIf { codegenConfig.enabled }?.let {
-            compileLock.withLock {
-                val compileEnv = compileEnvironmentFor(CompilationKind.DEFAULT)
-                val state = GenerationState.Builder(
-                    project = compileEnv.environment.project,
-                    builderFactory = ClassBuilderFactories.BINARIES,
-                    module = module,
-                    bindingContext = bindingContext,
-                    files = files.toList(),
-                    configuration = compileEnv.environment.configuration
-                ).build()
-                KotlinCodegenFacade.compileCorrectFiles(state)
-                state.factory.writeAllTo(it)
-            }
-        }
     }
 
     override fun close() {

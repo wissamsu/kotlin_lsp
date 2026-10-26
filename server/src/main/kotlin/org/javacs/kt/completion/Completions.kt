@@ -28,6 +28,7 @@ import org.jetbrains.kotlin.load.java.descriptors.JavaMethodDescriptor
 import org.jetbrains.kotlin.load.java.sources.JavaSourceElement
 import org.jetbrains.kotlin.load.java.structure.JavaMethod
 import org.jetbrains.kotlin.name.FqName
+import org.jetbrains.kotlin.incremental.components.NoLookupLocation
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.parentsWithSelf
@@ -51,7 +52,7 @@ import org.jetbrains.kotlin.utils.addToStdlib.applyIf
 import java.util.concurrent.TimeUnit
 
 // The maximum number of completion items
-private const val MAX_COMPLETION_ITEMS = 75
+private const val MAX_COMPLETION_ITEMS = 2000
 
 // The minimum length after which completion lists are sorted
 private const val MIN_SORT_LENGTH = 3
@@ -88,6 +89,19 @@ private fun getQueryNameFromExpression(receiver: KtExpression?, cursor: Int, fil
     return receiverType?.constructor?.declarationDescriptor?.fqNameSafe
 }
 
+/** True if the identifier being typed directly follows an annotation '@' (not 'this@Foo' or 'return@foo'). */
+private fun isAnnotationPosition(file: CompiledFile, cursor: Int): Boolean {
+    val text = file.content
+    var i = minOf(cursor, text.length)
+    while (i > 0 && (text[i - 1].isLetterOrDigit() || text[i - 1] == '_')) i--
+    if (i == 0 || text[i - 1] != '@') return false
+    // '@' preceded by an identifier character is a label ('this@Outer'), not an annotation
+    return i - 1 == 0 || !(text[i - 2].isLetterOrDigit() || text[i - 2] == '_')
+}
+
+private fun isAnnotationClass(file: CompiledFile, fqName: FqName): Boolean =
+    file.module.resolveClassByFqName(fqName, NoLookupLocation.FROM_IDE)?.kind == ClassKind.ANNOTATION_CLASS
+
 /** Finds completions in the global symbol index, for potentially unimported symbols. */
 private fun indexCompletionItems(file: CompiledFile, cursor: Int, element: KtElement?, index: SymbolIndex, partial: String): Sequence<CompletionItem> {
     val parsedFile = file.parse
@@ -116,6 +130,8 @@ private fun indexCompletionItems(file: CompiledFile, cursor: Int, element: KtEle
         else -> null
     }
 
+    val annotationOnly = isAnnotationPosition(file, cursor)
+
     return index
         .query(partial, queryName, limit = MAX_COMPLETION_ITEMS)
         .asSequence()
@@ -126,6 +142,12 @@ private fun indexCompletionItems(file: CompiledFile, cursor: Int, element: KtEle
                it.visibility == Symbol.Visibility.PUBLIC
             || it.visibility == Symbol.Visibility.PROTECTED
             || it.visibility == Symbol.Visibility.INTERNAL
+        }
+        .filter {
+            !annotationOnly || (
+                (it.kind == Symbol.Kind.CLASS || it.kind == Symbol.Kind.INTERFACE)
+                && isAnnotationClass(file, it.fqName)
+            )
         }
         .map { CompletionItem().apply {
             label = it.fqName.shortName().toString()
